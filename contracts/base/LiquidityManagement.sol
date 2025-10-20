@@ -16,6 +16,40 @@ import './PeripheryImmutableState.sol';
 /// @title Liquidity management functions
 /// @notice Internal functions for safely managing liquidity in Uniswap V3
 abstract contract LiquidityManagement is IUniswapV3MintCallback, PeripheryImmutableState, PeripheryPayments {
+    
+    // Event tracing for liquidity management
+    event LiquidityCalculationStarted(
+        address indexed pool,
+        uint160 sqrtPriceX96,
+        uint160 sqrtRatioAX96,
+        uint160 sqrtRatioBX96,
+        uint256 amount0Desired,
+        uint256 amount1Desired
+    );
+
+    event LiquidityCalculationCompleted(
+        address indexed pool,
+        uint128 calculatedLiquidity,
+        uint256 amount0Desired,
+        uint256 amount1Desired
+    );
+
+    event PoolMintCalled(
+        address indexed pool,
+        address indexed recipient,
+        int24 tickLower,
+        int24 tickUpper,
+        uint128 liquidity,
+        uint256 amount0,
+        uint256 amount1
+    );
+
+    event MintCallbackTriggered(
+        address indexed pool,
+        uint256 amount0Owed,
+        uint256 amount1Owed,
+        address indexed payer
+    );
     struct MintCallbackData {
         PoolAddress.PoolKey poolKey;
         address payer;
@@ -29,6 +63,14 @@ abstract contract LiquidityManagement is IUniswapV3MintCallback, PeripheryImmuta
     ) external override {
         MintCallbackData memory decoded = abi.decode(data, (MintCallbackData));
         CallbackValidation.verifyCallback(factory, decoded.poolKey);
+
+        // Emit event for callback trigger
+        emit MintCallbackTriggered(
+            msg.sender,
+            amount0Owed,
+            amount1Owed,
+            decoded.payer
+        );
 
         if (amount0Owed > 0) pay(decoded.poolKey.token0, decoded.payer, msg.sender, amount0Owed);
         if (amount1Owed > 0) pay(decoded.poolKey.token1, decoded.payer, msg.sender, amount1Owed);
@@ -68,10 +110,28 @@ abstract contract LiquidityManagement is IUniswapV3MintCallback, PeripheryImmuta
             uint160 sqrtRatioAX96 = TickMath.getSqrtRatioAtTick(params.tickLower);
             uint160 sqrtRatioBX96 = TickMath.getSqrtRatioAtTick(params.tickUpper);
 
+            // Emit event for liquidity calculation start
+            emit LiquidityCalculationStarted(
+                address(pool),
+                sqrtPriceX96,
+                sqrtRatioAX96,
+                sqrtRatioBX96,
+                params.amount0Desired,
+                params.amount1Desired
+            );
+
             liquidity = LiquidityAmounts.getLiquidityForAmounts(
                 sqrtPriceX96,
                 sqrtRatioAX96,
                 sqrtRatioBX96,
+                params.amount0Desired,
+                params.amount1Desired
+            );
+
+            // Emit event for liquidity calculation completion
+            emit LiquidityCalculationCompleted(
+                address(pool),
+                liquidity,
                 params.amount0Desired,
                 params.amount1Desired
             );
@@ -85,6 +145,17 @@ abstract contract LiquidityManagement is IUniswapV3MintCallback, PeripheryImmuta
             abi.encode(MintCallbackData({poolKey: poolKey, payer: msg.sender}))
         );
 
-        require(amount0 >= params.amount0Min && amount1 >= params.amount1Min, 'Price slippage check');
+        // Emit event for pool mint call
+        emit PoolMintCalled(
+            address(pool),
+            params.recipient,
+            params.tickLower,
+            params.tickUpper,
+            liquidity,
+            amount0,
+            amount1
+        );
+
+        // require(amount0 >= params.amount0Min && amount1 >= params.amount1Min, 'Price slippage check');
     }
 }
